@@ -6,7 +6,7 @@ import os
 import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from api.schema import OrderInput
+from schema import OrderInput
 
 # Initialize the FastAPI app
 app = FastAPI(
