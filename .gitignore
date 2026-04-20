@@ -1,7 +1,6 @@
 data/raw/
 data/processed/
 mlruns/
-*.pkl
 *.joblib
 __pycache__/
 .env
