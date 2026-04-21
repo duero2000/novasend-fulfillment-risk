@@ -7,71 +7,76 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 
 
-# Training data baseline distributions derived from the features_engineered Delta table
-# These represent the expected distribution of each feature at training time
+# Training baseline distributions derived from the features_engineered Delta table
+# Numeric features store bin proportions, binary features store the positive class rate
 BASELINE_DISTRIBUTIONS = {
-    "days_for_shipment_scheduled": {1: 0.12, 2: 0.18, 3: 0.22, 4: 0.20, 5: 0.16, 6: 0.12},
-    "shipping_mode": {
-        "Standard Class": 0.59,
-        "Second Class": 0.19,
-        "First Class": 0.15,
-        "Same Day": 0.07
+    "days_scheduled": {
+        0: 0.02, 1: 0.12, 2: 0.18, 3: 0.22, 4: 0.20, 5: 0.16, 6: 0.10
     },
-    "order_status": {
-        "COMPLETE": 0.47,
-        "PENDING": 0.17,
-        "PROCESSING": 0.14,
-        "CLOSED": 0.10,
-        "ON_HOLD": 0.07,
-        "SUSPECTED_FRAUD": 0.05
-    },
-    "market": {
-        "USCA": 0.31,
-        "Europe": 0.28,
-        "LATAM": 0.22,
-        "Pacific Asia": 0.13,
-        "Africa": 0.06
-    }
-}
-
-# PSI thresholds — standard industry interpretation
-PSI_THRESHOLDS = {
-    "No drift": (0.0, 0.10),
-    "Moderate drift": (0.10, 0.20),
-    "Significant drift": (0.20, float("inf"))
+    "suspected_fraud_rate":     0.0225,  # 2.25% positive rate in training data
+    "same_day_rate":            0.07,    # ~7% of orders used Same Day shipping
+    "aggressive_discount_rate": 0.111    # ~11.1% of orders had aggressive discount tier
 }
 
 
-def compute_psi(baseline: dict, current: dict) -> float:
-    # Population Stability Index measures how much a distribution has shifted
-    # PSI = sum((current% - baseline%) * ln(current% / baseline%))
+def compute_psi_continuous(baseline_dist: dict, current_dist: dict) -> float:
+    # PSI for continuous features — compares bin proportions across all buckets
+    # baseline_dist and current_dist are both value-to-proportion dicts
+    all_keys = sorted(set(list(baseline_dist.keys()) + list(current_dist.keys())))
     psi = 0.0
-    for key in baseline:
-        expected = baseline.get(key, 0.001)
-        actual = current.get(key, 0.001)
-        # Clip to avoid log(0)
-        expected = max(expected, 0.001)
-        actual = max(actual, 0.001)
-        psi += (actual - expected) * np.log(actual / expected)
+    for k in all_keys:
+        expected = max(baseline_dist.get(k, 0.0), 1e-4)
+        actual   = max(current_dist.get(k, 0.0), 1e-4)
+        psi     += (actual - expected) * np.log(actual / expected)
+    return round(psi, 4)
+
+
+def compute_psi_binary(baseline_rate: float, current_rate: float) -> float:
+    # PSI for binary features — compares positive and negative class proportions directly
+    # Histogram binning fails for low-prevalence binary features so proportion comparison is used
+    p_base = max(baseline_rate, 1e-4)
+    p_prod = max(current_rate, 1e-4)
+    q_base = max(1 - baseline_rate, 1e-4)
+    q_prod = max(1 - current_rate, 1e-4)
+    psi    = (p_prod - p_base) * np.log(p_prod / p_base) + \
+             (q_prod - q_base) * np.log(q_prod / q_base)
     return round(psi, 4)
 
 
 def get_psi_status(psi: float) -> tuple:
+    # Returns a display label and color string based on PSI thresholds
     if psi < 0.10:
-        return "✅ No drift", "green"
+        return "✅ Stable", "green"
     elif psi < 0.20:
-        return "⚠️ Moderate drift", "orange"
+        return "⚠️ Moderate Shift", "orange"
     else:
-        return "🚨 Significant drift", "red"
+        return "🚨 Significant Shift", "red"
 
 
-def compute_current_distribution(df: pd.DataFrame, feature: str) -> dict:
-    # Compute the frequency distribution of a feature from the scored orders
-    counts = df[feature].value_counts(normalize=True).to_dict()
-    return counts
+def derive_current_distributions(df: pd.DataFrame) -> dict:
+    # Derives current production distributions from the scored risk queue
+    # Days Scheduled is already numeric — compute value proportions directly
+    days_counts = df["Days Scheduled"].value_counts(normalize=True).to_dict()
+    days_dist   = {k: round(v, 4) for k, v in days_counts.items()}
+
+    # Binary features derived from string columns in the risk queue
+    suspected_fraud_rate     = (df["Order Status"] == "Suspected Fraud").mean()
+    same_day_rate            = (df["Shipping Mode"] == "Same Day").mean()
+
+    # Aggressive discount tier — orders with discount rate above 0.25 match training logic
+    # order_item_discount_rate is stored in raw_orders, not risk_queue
+    # Pull from raw_orders using session state
+    raw_df                   = pd.DataFrame(st.session_state.raw_orders)
+    aggressive_discount_rate = (raw_df["order_item_discount_rate"] > 0.25).mean()
+
+    return {
+        "days_dist":              days_dist,
+        "suspected_fraud_rate":   round(suspected_fraud_rate, 4),
+        "same_day_rate":          round(same_day_rate, 4),
+        "aggressive_discount_rate": round(aggressive_discount_rate, 4)
+    }
 
 
 def render_drift_monitoring():
@@ -81,7 +86,6 @@ def render_drift_monitoring():
         "Drift indicates the model may be seeing order patterns it was not trained on."
     )
 
-    # Check if there are scored orders in the risk queue to analyze
     if "risk_queue" not in st.session_state or len(st.session_state.risk_queue) < 10:
         st.info(
             "Not enough scored orders to analyze drift. "
@@ -89,92 +93,115 @@ def render_drift_monitoring():
         )
         return
 
-    df = pd.DataFrame(st.session_state.risk_queue)
+    df  = pd.DataFrame(st.session_state.risk_queue)
+    current = derive_current_distributions(df)
 
     st.markdown(f"**Analyzing {len(df)} scored orders against training baseline**")
     st.divider()
 
-    # PSI summary cards
-    st.markdown("**Population Stability Index (PSI) Summary**")
-    st.caption("PSI < 0.10: stable | PSI 0.10 to 0.20: moderate drift | PSI > 0.20: significant drift")
+    # PSI calculations
+    psi_days     = compute_psi_continuous(
+        BASELINE_DISTRIBUTIONS["days_scheduled"],
+        current["days_dist"]
+    )
+    psi_fraud    = compute_psi_binary(
+        BASELINE_DISTRIBUTIONS["suspected_fraud_rate"],
+        current["suspected_fraud_rate"]
+    )
+    psi_same_day = compute_psi_binary(
+        BASELINE_DISTRIBUTIONS["same_day_rate"],
+        current["same_day_rate"]
+    )
+    psi_discount = compute_psi_binary(
+        BASELINE_DISTRIBUTIONS["aggressive_discount_rate"],
+        current["aggressive_discount_rate"]
+    )
 
-    features_to_monitor = {
-        "shipping_mode": "shipping_mode",
-        "order_status": "order_status",
-        "market": "market"
+    psi_scores = {
+        "Days Scheduled":        psi_days,
+        "Suspected Fraud Rate":  psi_fraud,
+        "Same Day Shipping Rate": psi_same_day,
+        "Aggressive Discount Rate": psi_discount
     }
 
-    psi_results = {}
-    cols = st.columns(len(features_to_monitor))
+    # PSI summary metric cards
+    st.markdown("**Population Stability Index (PSI) Summary**")
+    st.caption("PSI < 0.10: stable | 0.10 to 0.20: moderate shift | > 0.20: significant shift")
 
-    for i, (feature, col_name) in enumerate(features_to_monitor.items()):
-        if col_name in df.columns:
-            current_dist = compute_current_distribution(df, col_name)
-            psi = compute_psi(BASELINE_DISTRIBUTIONS[feature], current_dist)
-            status_label, status_color = get_psi_status(psi)
-            psi_results[feature] = {"psi": psi, "status": status_label, "current": current_dist}
-
-            with cols[i]:
-                st.metric(
-                    label=feature.replace("_", " ").title(),
-                    value=f"PSI: {psi:.4f}",
-                    delta=status_label,
-                    delta_color="off"
-                )
+    cols = st.columns(4)
+    for i, (label, psi) in enumerate(psi_scores.items()):
+        status_label, _ = get_psi_status(psi)
+        with cols[i]:
+            st.metric(
+                label=label,
+                value=f"PSI: {psi:.4f}",
+                delta=status_label,
+                delta_color="off"
+            )
 
     st.divider()
 
     # Distribution comparison charts
     st.markdown("**Distribution Comparison — Baseline vs Incoming Orders**")
 
-    for feature, col_name in features_to_monitor.items():
-        if feature not in psi_results:
-            continue
+    # Days Scheduled — grouped bar chart across all bin values
+    st.markdown("**Days Scheduled for Shipment**")
+    all_days  = sorted(set(list(BASELINE_DISTRIBUTIONS["days_scheduled"].keys()) +
+                           list(current["days_dist"].keys())))
+    base_vals = [BASELINE_DISTRIBUTIONS["days_scheduled"].get(d, 0) for d in all_days]
+    curr_vals = [current["days_dist"].get(d, 0) for d in all_days]
 
-        st.markdown(f"**{feature.replace('_', ' ').title()}**")
+    fig_days = go.Figure()
+    fig_days.add_trace(go.Bar(
+        name="Training Baseline", x=[str(d) for d in all_days],
+        y=base_vals, marker_color="#4a90d9", opacity=0.8
+    ))
+    fig_days.add_trace(go.Bar(
+        name="Incoming Orders", x=[str(d) for d in all_days],
+        y=curr_vals, marker_color="#e8513a", opacity=0.8
+    ))
+    fig_days.update_layout(
+        barmode="group", height=300,
+        margin=dict(t=20, b=20, l=20, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        yaxis_tickformat=".0%"
+    )
+    st.plotly_chart(fig_days, use_container_width=True)
 
-        baseline = BASELINE_DISTRIBUTIONS[feature]
-        current = psi_results[feature]["current"]
+    # Binary features — two-bar chart showing positive class rate only
+    binary_features = {
+        "Suspected Fraud Rate":     (BASELINE_DISTRIBUTIONS["suspected_fraud_rate"],
+                                     current["suspected_fraud_rate"]),
+        "Same Day Shipping Rate":   (BASELINE_DISTRIBUTIONS["same_day_rate"],
+                                     current["same_day_rate"]),
+        "Aggressive Discount Rate": (BASELINE_DISTRIBUTIONS["aggressive_discount_rate"],
+                                     current["aggressive_discount_rate"])
+    }
 
-        # Align keys across both distributions
-        all_keys = sorted(set(list(baseline.keys()) + list(current.keys())), key=str)
-
-        baseline_vals = [baseline.get(k, 0) for k in all_keys]
-        current_vals = [current.get(k, 0) for k in all_keys]
-
+    for label, (base_rate, curr_rate) in binary_features.items():
+        st.markdown(f"**{label}**")
         fig = go.Figure()
-
         fig.add_trace(go.Bar(
-            name="Training Baseline",
-            x=[str(k) for k in all_keys],
-            y=baseline_vals,
-            marker_color="#4a90d9",
-            opacity=0.8
+            name="Training Baseline", x=["Positive Rate"],
+            y=[base_rate], marker_color="#4a90d9", opacity=0.8
         ))
-
         fig.add_trace(go.Bar(
-            name="Incoming Orders",
-            x=[str(k) for k in all_keys],
-            y=current_vals,
-            marker_color="#e8513a",
-            opacity=0.8
+            name="Incoming Orders", x=["Positive Rate"],
+            y=[curr_rate], marker_color="#e8513a", opacity=0.8
         ))
-
         fig.update_layout(
-            barmode="group",
-            height=300,
+            barmode="group", height=250,
             margin=dict(t=20, b=20, l=20, r=20),
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            yaxis_tickformat=".0%"
+            yaxis_tickformat=".1%"
         )
-
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
     st.markdown("**What to do if drift is detected**")
     st.markdown("""
-    - **Moderate drift** — monitor closely, no immediate action required
-    - **Significant drift** — investigate whether order patterns have genuinely changed
-    - If drift persists, retrain the model on more recent order data and redeploy
+    - **Moderate shift** — monitor closely, no immediate action required
+    - **Significant shift** — investigate whether order patterns have genuinely changed
+    - If drift persists across multiple scoring sessions, retrain the model on more recent data and redeploy
     """)
