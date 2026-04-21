@@ -167,6 +167,11 @@ def render_drift_monitoring():
         yaxis_tickformat=".0%"
     )
     st.plotly_chart(fig_days, use_container_width=True)
+    
+    st.caption(
+        "Note: PSI for continuous features is sensitive to small sample sizes. "
+        "Results stabilize with 50 or more scored orders in the queue."
+    )
 
     # Binary features — two-bar chart showing positive class rate only
     binary_features = {
@@ -196,6 +201,7 @@ def render_drift_monitoring():
             yaxis_tickformat=".1%"
         )
         st.plotly_chart(fig, use_container_width=True)
+        
 
     st.divider()
 
