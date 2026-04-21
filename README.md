@@ -178,7 +178,7 @@ The notebooks in `notebooks/` are designed to run in Databricks Community Editio
 
 ## Key Design Decisions
 
-**No SMOTE.** The target variable class distribution was 55% late and 45% on time. That is balanced enough that oversampling would have added complexity without solving a real problem.
+**Class distribution.** The dataset provided a cleaner starting point than the business narrative suggested. With a 55% late delivery rate observed in the data, this was never a rare event problem. That distribution gave the model a strong, balanced representation to learn from without any intervention needed.
 
 **Joblib over MLflow registry at runtime.** Databricks Community Edition PAT token scopes blocked Unity Catalog model registry promotion. Loading from the committed `.pkl` file keeps the API self-contained and eliminates a live Databricks dependency in production.
 
