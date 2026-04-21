@@ -61,11 +61,15 @@ EXPERIMENT_RUNS = [
 ]
 
 
+
 def render_experiment_design():
     st.subheader("🧪 Experiment Comparison")
     st.write("All model runs tracked in the Databricks MLflow experiment `/novasend-fulfillment-risk`.")
 
     df = pd.DataFrame(EXPERIMENT_RUNS)
+    
+    # Sort by AUC descending so the winning model appears at the top
+    df = df.sort_values("AUC", ascending=False).reset_index(drop=True)
 
     # Highlight the winning model
     st.markdown("**All Runs**")

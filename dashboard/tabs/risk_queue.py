@@ -112,7 +112,7 @@ def generate_synthetic_order() -> dict:
     department = random.choice(list(DEPARTMENT_PRODUCTS.keys()))
     product_name, price_min, price_max = random.choice(DEPARTMENT_PRODUCTS[department])
     product_price   = round(random.uniform(price_min, price_max), 2)
-    discount_rate   = round(random.uniform(0.0, 0.35), 4)
+    discount_rate   = round(random.uniform(0.0, 0.35), 2)
     discount_amount = round(product_price * discount_rate, 2)
     quantity        = random.randint(1, 5)
 
