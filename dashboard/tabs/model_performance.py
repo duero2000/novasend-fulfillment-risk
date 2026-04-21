@@ -46,7 +46,7 @@ FEATURE_IMPORTANCE = {
 
 
 def render_model_performance():
-    st.subheader("📊 Model Performance")
+    st.subheader("Model Performance")
     st.write("Evaluation results for the tuned XGBoost model on the held-out test set.")
 
     # Top level metric cards

@@ -63,7 +63,7 @@ EXPERIMENT_RUNS = [
 
 
 def render_experiment_design():
-    st.subheader("🧪 Experiment Comparison")
+    st.subheader("Experiment Comparison")
     st.write("All model runs tracked in the Databricks MLflow experiment `/novasend-fulfillment-risk`.")
 
     df = pd.DataFrame(EXPERIMENT_RUNS)

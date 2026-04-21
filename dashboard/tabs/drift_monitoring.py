@@ -80,7 +80,7 @@ def derive_current_distributions(df: pd.DataFrame) -> dict:
 
 
 def render_drift_monitoring():
-    st.subheader("📡 Drift Monitoring")
+    st.subheader("Drift Monitoring")
     st.write(
         "Compares the distribution of scored orders against the training data baseline. "
         "Drift indicates the model may be seeing order patterns it was not trained on."
