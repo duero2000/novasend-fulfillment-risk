@@ -213,25 +213,3 @@ The following columns were excluded from all feature sets:
 **Target variable**: `Late_delivery_risk` (binary: 1 = late, 0 = on time)  
 **Class distribution**: ~55% late, ~45% on time  
 **Raw data**: Not committed to GitHub — loaded into Databricks as a Delta table
-
----
-
-## Project Status
-
-| Phase | Status |
-|---|---|
-| EDA | Complete |
-| Feature engineering | Complete |
-| Modeling + experiment tracking | Complete |
-| Prediction API | Complete — live on Render |
-| Streamlit dashboard | Complete — live on Streamlit Community Cloud |
-| Drift monitoring notebook | Complete |
-| Case study | Complete |
-| README | Complete |
-| Power BI stakeholder report | In progress |
-
----
-
-## Target Roles
-
-This project was built to strengthen candidacy for Data Scientist, Senior Data Analyst, Analytics Engineer, and Supply Chain Analytics roles. It demonstrates end-to-end production ML delivery including data pipeline design, experiment tracking, REST API serving, live dashboard deployment, and model monitoring.
